@@ -8,6 +8,11 @@ from torch import nn
 
 
 
+def bilinear_kernel(in_c, out_c, k_size):
+    factor = (k_size + 1)//2
+    
+
+
 class FCN(nn.Module):
     def __init__(self, num_c):
         super().__init__()
