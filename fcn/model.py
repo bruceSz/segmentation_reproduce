@@ -10,7 +10,18 @@ from torch import nn
 
 def bilinear_kernel(in_c, out_c, k_size):
     factor = (k_size + 1)//2
-    
+
+    if k_size %2 ==1:
+        center = factor -1
+    else :
+        center = factor - 0.5
+
+    og = np.ogrid[:k_size, :k_size]
+    bi_filter = (1-abs(og[0]-center)/factor)*(1-abs(og[1]-center)/factor)
+    weight = np.zeros((in_c, out_c,k_size,k_size),dtype=np.float32)
+    weight[range(in_c), range(out_c),:,:] = bi_filter
+    return torch.from_numpy(weight)
+
 
 
 class FCN(nn.Module):
