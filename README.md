@@ -12,3 +12,6 @@
 * dfn 
 * conv-deconv
 * deeplab
+
+# TODO
+* understand how unet concat encode and decode.
