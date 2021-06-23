@@ -50,10 +50,16 @@ class extension_block(nn.Module):
 
 
     def forward(self, e,d):
+        #print( "  d (before up) is: ", d.size())
         d = self.up(d)
+        #print("origin e: ", e.size(), " ; d (after up) is: ", d.size())
+
         diffY = e.size()[2] - d.size()[2]
-        diffX = e.size()[3] - e.size()[3]
+        diffX = e.size()[3] - d.size()[3]
+        #print("diffX: ", diffX, " diffY: ", diffY)
         e = e[:,:,diffY//2:e.size()[2]-diffY//2,diffX//2:e.size()[3]-diffX//2]
+        #print("new e size: ", e.size())
+        # cat along channel
         cat = torch.cat([e,d],dim=1)
         out = self.block(cat)
         return out
@@ -110,27 +116,30 @@ class UNet(nn.Module):
 
     def forward(self, x):
 
+        print("forwar here.")
         # encode phase.
         encod1 = self.conv_end1(x) 
-        if self.debug: print("encod1 size; ",encod1.size())
-        encod_pool1 = self.conv_pool1(encod1)
+        #if self.debug: print("encod1 size; ",encod1.size())
+        encod_pool1 = self.conv_pool1(encod1)   
+        if self.debug: print("encod pool1 size; ",encod_pool1.size())
         
 
         encod2 = self.conv_end2(encod_pool1)
         encod_pool2 = self.conv_pool2(encod2)
-        if self.debug: print("encod2 size; ",encod2.size())
+        if self.debug: print("encod pool2 size; ",encod2.size())
 
         encod3 = self.conv_end3(encod_pool2)
         encod_pool3 = self.conv_pool3(encod3)
-        if self.debug: print("encod3 size; ",encod3.size())
+        if self.debug: print("encod pool3 size; ",encod3.size())
 
         encod4 = self.conv_end4(encod_pool3)
         encod_pool4 = self.conv_pool4(encod4)
-        if self.debug: print("encod4 size; ",encod4.size())
+        if self.debug: print("encod pool4 size; ",encod4.size())
 
 
         # bottleneck phase
         bn = self.bottleneck(encod_pool4)
+        if self.debug: print("bottleneck size; ",bn.size())
 
         # decode phase
         dec4 = self.conv_dec4(encod4, bn)
