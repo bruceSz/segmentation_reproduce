@@ -11,8 +11,6 @@ import torch
 from torch import nn
 
 
-
-
 #def contraction_block(in, out):
 def contraction_block(in_channels, out_channels):
 
