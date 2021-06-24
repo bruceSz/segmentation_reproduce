@@ -91,34 +91,36 @@ class VGG16_deconv(nn.Module):
 
 
         # 64 * 176 * 240
-        en2 = self.encod2(x) 
+        en2 = self.encod2(pl1) 
         o_size2 = en2.size()
         # 128 * 176 * 240
         pl2, indices2 = self.pool2(en2)
 
 
-        # 64 * 176 * 240
-        en3 = self.encod3(x) 
+        # 128 * 88 * 120
+        en3 = self.encod3(pl2) 
         o_size3 = en3.size()
-        # 128 * 176 * 240
+        # 256 * 88 * 120
         pl3, indices3 = self.pool3(en3)
 
 
-        # 64 * 176 * 240
-        en4 = self.encod4(x) 
+        # 256 * 44 * 60
+        en4 = self.encod4(pl3) 
         o_size4 = en4.size()
-        # 128 * 176 * 240
+        # 512 * 44 * 60
         pl4, indices4 = self.pool4(en4)
 
 
-        # 64 * 176 * 240
-        en5 = self.encod5(x) 
+        # 512 * 22 * 30
+        en5 = self.encod5(pl4) 
         o_size5 = en5.size()
-        # 128 * 176 * 240
+        # 512 * 22 * 30
         pl5, indices5 = self.pool5(en5)
 
 
         # flatten the pool5
+
+        # 512 * 11 * 15
         pool5 = pl5.view(pl5.size(0), -1)
         fc = self.clss(pool5)
         fc = fc.reshape(1,512,11,15)
@@ -144,7 +146,7 @@ class VGG16_deconv(nn.Module):
 
 
 if __name__ == "__main__":
-    #print(vgg16_pretrained)
+    print(vgg16_pretrained)
     
     rgb = torch.randn(1, 3, 352, 480)
 
