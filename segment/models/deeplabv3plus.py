@@ -7,7 +7,31 @@
 ########################################################################
 
 from torch import nn
-from torch._C import strided
+import torch.nn.functional as F
+
+
+def fixed_padding(inputs, kernel_size, dilation):
+    kse = kernel_size + (kernel_size - 1) * (dilation-1)
+    pad_total = kse - 1
+    pad_beg = pad_total // 2
+    pad_end = pad_total - pad_beg
+    padded_inputs = F.pad(inputs, (pad_beg, pad_end, pad_beg, pad_end))
+    return padded_inputs
+
+
+class SeparableConv2d_same(nn.Module):
+    def __init__(self, inc, outc, kernel_size=3, stride=1, dilation=1, bias=False):
+        super(SeparableConv2d_same, self).__init__()
+        self.conv1 = nn.Conv2d(inc, outc, kernel_size,
+                               stride, 0, dilation, groups=inc, bias=bias)
+        self.pointwise = nn.Conv2d(inc, outc, 1, 1, 0, 1, 1, bias=bias)
+
+    def forward(self, x):
+        x = fixed_padding(
+            x, self.conv1.kernel_size[0], dilation=self.conv1.dilation[0])
+        x = self.conv1(x)
+        x = self.pointwise(x)
+        return x
 
 
 class Block(nn.Module):
@@ -18,7 +42,7 @@ class Block(nn.Module):
             self.skipbn = nn.BatchNorm2d(outc)
         else:
             self.skip = None
-        self.relu = nn.Relu(inplace=True)
+        self.relu = nn.ReLU(inplace=True)
         rep = []
 
         filters = inc
@@ -42,7 +66,7 @@ class Block(nn.Module):
             rep.append(nn.BatchNorm2d(outc))
 
         if not start_with_relu:
-            rep = ret[1:]
+            rep = rep[1:]
 
         if stride != 1:
             rep.append(SeparableConv2d_same(outc, outc, 3, stride=2))
@@ -84,10 +108,10 @@ class Xception(nn.Module):
         self.conv2 = nn.Conv2d(32, 64, 3, stride=1, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(64)
 
-        self.block1 = Block(64, 128, reps=2, sride=2, start_with_relu=False)
+        self.block1 = Block(64, 128, reps=2, stride=2, start_with_relu=False)
         self.block2 = Block(128, 256, reps=2, stride=2,
                             start_with_relu=True, grow_first=True)
-        self.block3 = Block(256, 728, stride=entry_block3_stride,
+        self.block3 = Block(256, 728, reps=2, stride=entry_block3_stride,
                             start_with_relu=True, grow_first=True, is_last=True)
 
         self.block4 = Block(728, 728, reps=3, stride=1,
@@ -201,8 +225,9 @@ class Xception(nn.Module):
 
 class ASPP(nn.Module):
     def __init__(self):
-        super().__init__(inc, outc, os):
-        super(ASPP, self).__init__()
+        # `os`: output_stride
+
+        super(ASPP, self).__init__(inc, outc, os)
 
         # ASPP
         if os == 16:
@@ -233,6 +258,8 @@ class ASPP(nn.Module):
         self.conv1 = nn.Conv2d(1280, 256, 1, bias=False)
         self.bn1 = nn.BatchNorm2d(256)
 
+        self._init_weight()
+
     def forward(self, x):
         x1 = self.aspp1(x)
         x2 = self.aspp2(x)
@@ -245,14 +272,62 @@ class ASPP(nn.Module):
         x = torch.cat((x1, x2, x3, x4, x5), dim=1)
         return x
 
+    def _init_weight(self):
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
+                m.weight.data.normal_(0, math.sqrt(2./n))
+            elif isinstance(m, nn.BatchNorm2d):
+                m.weight.data.fill_(1)
+                m.bias.data.zero_()
+
 
 class DeepLabV3Plus(nn.Module):
-    def __init__(self):
-        super(DeepLabV3Plus, self).__init__(
-            self, inc=3, nclass=12, os=16, _print=True)
+    def __init__(self, inc=3, nclass=12, os=16, _print=True):
+        super(DeepLabV3Plus, self).__init__()
         if _print:
             pass
         self.xception = Xception(inc, os)
+        self.aspp = ASPP(2048, 256, 16)
+
+        self.conv1 = nn.Conv2d(1280, 256, 1, bias=False)
+        self.bn1 = nn.BatchNorm2d(256)
+        self.relu = nn.ReLU()
+
+        self.conv2 = nn.Conv2d(128, 48, 1, bias=False)
+        self.bn2 = nn.BatchNorm2d(48)
+
+        self.last_conv = nn.Sequential(nn.Conv2d(304, 256, kernel_size=3, stride=1, padding=1, bias=False),
+                                       nn.BatchNorm2d(256),
+                                       nn.ReLU(),
+                                       nn.Conv2d(256, 256, kernel_size=3,
+                                                 stride=1, padding=1, bias=False),
+                                       nn.BatchNorm2d(256),
+                                       nn.ReLU(),
+                                       nn.Conv2d(256, n_classes,
+                                                 kernel_size=1, stride=1)
+                                       )
+
+    def forward(self, input):
+        x, low_l_features = self.xception(input)
+        x = self.aspp(x)
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+
+        x = F.interpolate(x, size=(int(mat.ceil(input.size()[-2]/4)),
+                                   int(math.ceil(input.size()[-1]/4))),
+                          mode='bilinear', align_corners=True)
+
+        low_l_features = self.conv2(low_l_features)
+        low_l_features = self.bn2(low_l_features)
+        low_l_features = self.relu(low_l_features)
+
+        x = torch.cat((x, low_l_features), dim=1)
+        x = self.last_conv(x)
+        x = F.interpolate(x, size=input.size()[
+                          2:], mode='bilinear', align_corners=True)
+        return x
 
 
 if __name__ == "__main__":
