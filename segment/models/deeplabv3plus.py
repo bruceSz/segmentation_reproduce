@@ -7,6 +7,8 @@
 ########################################################################
 
 from torch import nn
+import math
+import torch
 import torch.nn.functional as F
 
 
@@ -22,7 +24,8 @@ def fixed_padding(inputs, kernel_size, dilation):
 class SeparableConv2d_same(nn.Module):
     def __init__(self, inc, outc, kernel_size=3, stride=1, dilation=1, bias=False):
         super(SeparableConv2d_same, self).__init__()
-        self.conv1 = nn.Conv2d(inc, outc, kernel_size,
+        print("inc : ", inc, " outc: ", outc, )
+        self.conv1 = nn.Conv2d(inc, inc, kernel_size,
                                stride, 0, dilation, groups=inc, bias=bias)
         self.pointwise = nn.Conv2d(inc, outc, 1, 1, 0, 1, 1, bias=bias)
 
@@ -56,7 +59,7 @@ class Block(nn.Module):
             rep.append(self.relu)
             rep.append(SeparableConv2d_same(
                 filters, filters, 3, stride=1, dilation=dilation))
-            rep.append(nn.BatchNorm2d(outc))
+            rep.append(nn.BatchNorm2d(filters))
             filters = outc
 
         if not grow_first:
@@ -148,12 +151,12 @@ class Xception(nn.Module):
                              dilation=middle_block_dilation, start_with_relu=True, grow_first=True)
 
         self.block20 = Block(728, 1024, reps=2, stride=1,
-                             dilation=exit_block_dilations[0], start_with_relu=True, grow_first=False, is_last=True)
+                             dilation=exit_block_dilation[0], start_with_relu=True, grow_first=False, is_last=True)
         self.conv3 = SeparableConv2d_same(
             1024, 1536, 3, stride=1, dilation=exit_block_dilation[1])
         self.bn3 = nn.BatchNorm2d(1536)
 
-        self.conv4 = SeprableConv2d_same(
+        self.conv4 = SeparableConv2d_same(
             1536, 1536, 3, stride=1, dilation=exit_block_dilation[1])
         self.bn4 = nn.BatchNorm2d(1536)
 
@@ -224,10 +227,10 @@ class Xception(nn.Module):
 
 
 class ASPP(nn.Module):
-    def __init__(self):
+    def __init__(self,inc, outc, os):
         # `os`: output_stride
 
-        super(ASPP, self).__init__(inc, outc, os)
+        super(ASPP, self).__init__()
 
         # ASPP
         if os == 16:
@@ -235,18 +238,22 @@ class ASPP(nn.Module):
         elif os == 8:
             dilations = [1, 12, 24, 32]
 
-        self.aspp1 = nn.Sequential(nn.Conv2d(inc, outc, kernel_size=1, stride=1, padding=0, dilation=dilations[0], bias=False),
+        self.aspp1 = nn.Sequential(nn.Conv2d(inc, outc, kernel_size=1, stride=1, 
+            padding=0, dilation=dilations[0], bias=False),
                                    nn.BatchNorm2d(outc),
                                    nn.ReLU())
-        self.aspp2 = nn.Sequential(nn.Conv2d(inc, outc, kernel_size=3, stride=1, padding=dilations[1], dilation=dilations[1], bias=False),
+        self.aspp2 = nn.Sequential(nn.Conv2d(inc, outc, kernel_size=3, stride=1, 
+        padding=dilations[1], dilation=dilations[1], bias=False),
                                    nn.BatchNorm2d(outc),
                                    nn.ReLU())
 
-        self.aspp3 = nn.Sequential(nn.Conv2d(inc, outc, kernel_size=3, stride=1, padding=dilations[2], dilation=dilations[2], bias=False),
+        self.aspp3 = nn.Sequential(nn.Conv2d(inc, outc, kernel_size=3, stride=1, 
+        padding=dilations[2], dilation=dilations[2], bias=False),
                                    nn.BatchNorm2d(outc),
                                    nn.ReLU())
 
-        self.aspp4 = nn.Sequential(nn.Conv2d(inc, outc, kernel_size=3, stride=1, padding=dilations[3], dilation=dilations[4], bias=False),
+        self.aspp4 = nn.Sequential(nn.Conv2d(inc, outc, kernel_size=3, stride=1, 
+        padding=dilations[3], dilation=dilations[3], bias=False),
                                    nn.BatchNorm2d(outc),
                                    nn.ReLU())
 
@@ -286,6 +293,11 @@ class DeepLabV3Plus(nn.Module):
     def __init__(self, inc=3, nclass=12, os=16, _print=True):
         super(DeepLabV3Plus, self).__init__()
         if _print:
+            print("deeplabv3+")
+            print("backbone xception.")
+            print("class no: ", nclass)
+            print("output stride: ", os)
+            print("input c: ", inc)
             pass
         self.xception = Xception(inc, os)
         self.aspp = ASPP(2048, 256, 16)
@@ -304,18 +316,19 @@ class DeepLabV3Plus(nn.Module):
                                                  stride=1, padding=1, bias=False),
                                        nn.BatchNorm2d(256),
                                        nn.ReLU(),
-                                       nn.Conv2d(256, n_classes,
+                                       nn.Conv2d(256, nclass,
                                                  kernel_size=1, stride=1)
                                        )
 
     def forward(self, input):
         x, low_l_features = self.xception(input)
+        print("xception forward done. output size:", x.size())
         x = self.aspp(x)
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
 
-        x = F.interpolate(x, size=(int(mat.ceil(input.size()[-2]/4)),
+        x = F.interpolate(x, size=(int(math.ceil(input.size()[-2]/4)),
                                    int(math.ceil(input.size()[-1]/4))),
                           mode='bilinear', align_corners=True)
 
